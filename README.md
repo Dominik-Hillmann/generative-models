@@ -1,2 +1,3 @@
 # generative-models
-A playground for generative architectures.
+A collection for first simple implementations of generative architectures on 
+standard datasets like MNIST.

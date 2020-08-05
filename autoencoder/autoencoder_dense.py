@@ -26,17 +26,47 @@ from PIL import Image
 import matplotlib.pyplot as plt
 
 
+class EncoderDense(nn.Module):
+
+    def __init__(self, n_latent_dims, device: str):
+        super(EncoderDense, self).__init__()
+        self.device = device
+
+        self.dense_1 = nn.Linear(28 * 28, 256)
+        self.dense_2 = nn.Linear(256, n_latent_dims)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = func.leaky_relu(self.dense_1(x))
+        x = func.leaky_relu(self.dense_2(x))
+        
+        return x
+
+
+class DecoderDense(nn.Module):
+    def __init__(self, n_latent_dims: int, device: str):
+        super(DecoderDense, self).__init__()
+        self.device = device
+
+        self.dense_1 = nn.Linear(n_latent_dims, 256)
+        self.dense_2 = nn.Linear(256, 28 * 28)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = func.leaky_relu(self.dense_1(x))
+        x = self.dense_2(x)
+
+        return x
+
+
 class AutoencoderDense(nn.Module):
     """An autoencoder that only uses fully connected layers."""
 
-    def __init__(self, num_latent_dims: int, device: str):
+    def __init__(self, n_latent_dims: int, device: str):
         super(AutoencoderDense, self).__init__()
         self.device = device
         
-        self.encode_1 = nn.Linear(28 * 28, 256)
-        self.encode_2 = nn.Linear(256, num_latent_dims)
-        self.decode_1 = nn.Linear(num_latent_dims, 256)
-        self.decode_2 = nn.Linear(256, 28 * 28)
+        self.encoder = EncoderDense(n_latent_dims, device)
+        self.decoder = DecoderDense(n_latent_dims, device)
 
 
     def _flatten(self, x: torch.Tensor):
@@ -45,10 +75,8 @@ class AutoencoderDense(nn.Module):
 
     def forward(self, x: torch.Tensor):
         x = self._flatten(x)
-        x = func.relu(self.encode_1(x))
-        x = func.relu(self.encode_2(x))
-        x = func.relu(self.decode_1(x))
-        x = self.decode_2(x)
+        x = self.encoder(x)
+        x = self.decoder(x)
         
         return x
 
@@ -96,6 +124,17 @@ def train(
     else:
         draw_losses(avg_train_losses, n_batches_till_test, os.path.join('autoencoder', 'losses.png'), val_losses = avg_test_losses)
 
+    with torch.no_grad():
+        for test_batch_X, _ in test_data:
+            test_batch_X = test_batch_X.to(device)
+            test_batch_X = test_batch_X.view(-1, 28 * 28)
+            pred_X = model(test_batch_X)
+            save_from_flat_tensor(test_batch_X[28], 'ground.png')
+            save_from_flat_tensor(pred_X[28], 'pred.png')
+
+            break
+
+
     if save:
         pass
 
@@ -115,18 +154,18 @@ def validate(model: nn.Module, test_data: DataLoader, loss_fn: Callable, device:
 
 
 def draw_losses(train_losses: List[float], interval_size: int, save_path: str, val_losses: List[float] = None) -> None:
-        assert len(train_losses) == len(val_losses)
-        batches = [0]
-        while len(batches) != len(train_losses):
-            batches.append(batches[len(batches) - 1] + interval_size)
-                
-        plt.plot(batches, train_losses, 'r-', label = 'Training loss')
-        plt.plot(batches, val_losses, 'b-', label = 'Validation loss')
-        plt.title(f'Average MSE of the last {interval_size} batches of {BATCH_SIZE} images')
-        plt.xlabel('Batch')
-        plt.ylabel('Loss (MSE)')
-        plt.legend(loc = 'upper right')
-        plt.savefig(save_path)
+    assert len(train_losses) == len(val_losses)
+    batches = [0]
+    while len(batches) != len(train_losses):
+        batches.append(batches[len(batches) - 1] + interval_size)
+            
+    plt.plot(batches, train_losses, 'r-', label = 'Training loss')
+    plt.plot(batches, val_losses, 'b-', label = 'Validation loss')
+    plt.title(f'Average MSE of the last {interval_size} batches of {BATCH_SIZE} images')
+    plt.xlabel('Batch')
+    plt.ylabel('Loss (MSE)')
+    plt.legend(loc = 'upper right')
+    plt.savefig(save_path)
 
 
 def get_device() -> str:
@@ -141,16 +180,21 @@ def get_device() -> str:
     return device
 
 
-def reconstruct_from_flat_img(flat_img: torch.Tensor):
-    pass
-
+def save_from_flat_tensor(flat_img: torch.Tensor, name: str) -> torch.Tensor:
+    img = flat_img.view(28, 28)
+    img *= MNIST_STD
+    img += MNIST_MEAN
+    img *= 255
+    img = img.type(torch.uint8)
+    print(img)
+    plt.imsave(os.path.join(name), np.array(img.cpu()), cmap = 'Greys')
 
 def main():
     device = get_device()
 
     normalize = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize([0.1307], [0.3081]) # Over all of the dataset
+        transforms.Normalize([MNIST_MEAN], [MNIST_STD]) # Over all of the dataset
     ])
     train_data = torchvision.datasets.MNIST(os.path.join('.', 'data'), train = True, download = True, transform = normalize)
     train_loader = DataLoader(train_data, batch_size = BATCH_SIZE)
@@ -158,8 +202,9 @@ def main():
     test_data = torchvision.datasets.MNIST(os.path.join('.', 'data'), train = False, download = True, transform = normalize)
     test_loader = DataLoader(test_data, batch_size = int(len(test_data) / 2))
 
-    model = AutoencoderDense(16, device)
-    train(model, train_loader, device, test_data = test_loader)
+    model = AutoencoderDense(64, device)
+    print(list(model.children()))
+    train(model, train_loader, device, test_data = test_loader, n_epochs = 10)
 
 
 if __name__ == '__main__':

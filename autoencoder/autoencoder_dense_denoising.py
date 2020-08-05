@@ -1,0 +1,1 @@
+# Idee, genoiste sind X, ungenoiste sind Y, gleiche Transformationen + Noising

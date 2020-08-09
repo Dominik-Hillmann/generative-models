@@ -1,7 +1,9 @@
 # Python libraries
 import os
 import math
-# External
+# Internal imports
+from utils import train, get_device, save_from_flat_tensor
+# External imports
 import numpy as np
 import torchvision
 from torchvision import transforms
@@ -10,24 +12,18 @@ from torch import nn
 import torch.nn.functional as func
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
 import matplotlib.pyplot as plt
-
 # Typing
 from typing import Callable, List
-
-# Hyperparameters
+# Constants
 BATCH_SIZE = 32
 MNIST_MEAN = 0.1307
 MNIST_STD = 0.3081
 
 from PIL import Image
 
-import matplotlib.pyplot as plt
-
 
 class EncoderDense(nn.Module):
-
     def __init__(self, n_latent_dims, device: str):
         super(EncoderDense, self).__init__()
         self.device = device
@@ -80,114 +76,17 @@ class AutoencoderDense(nn.Module):
         
         return x
 
+    def get_decoder(self) -> nn.Module:
+        return list(self.children())[1]
 
-def train(
-    model: nn.Module, 
-    train_data: DataLoader,
-    device: str,
-    test_data: DataLoader = None,
-    n_epochs: int = 5, 
-    lr: float = 0.001,
-    n_batches_till_test: int = 10,
-    save: bool = False
-):
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr = lr)
-    loss_fn = nn.MSELoss() # Measures squared difference between each element of the prediction and ground truth.
-    avg_test_losses = []
-    avg_train_losses = []
-
-    for epoch in range(n_epochs):
-        print(f'Running epoch {epoch + 1} of {n_epochs}.')
-        for batch_idx, (train_batch_X, _) in tqdm(enumerate(train_data)):
-            batch_train_losses = []
-            train_batch_X = train_batch_X.to(device)
-            train_batch_X = train_batch_X.view(-1, 28 * 28)
-
-            model.zero_grad()
-            pred_X = model(train_batch_X)
-            loss = loss_fn(pred_X, train_batch_X)
-            loss.backward()
-            optimizer.step()
-            batch_train_losses.append(loss.item())
-
-            if batch_idx % (BATCH_SIZE * n_batches_till_test) == 0:
-                if test_data is not None:
-                    test_loss = validate(model, test_data, loss_fn, device)
-                    avg_test_losses.append(test_loss)
-
-                avg_train_losses.append(np.mean(np.array(batch_train_losses)))                
-                batch_train_losses.clear()
     
-    if test_data is not None:
-        draw_losses(avg_train_losses, n_batches_till_test, os.path.join('autoencoder', 'losses.png'), val_losses = avg_test_losses)
-    else:
-        draw_losses(avg_train_losses, n_batches_till_test, os.path.join('autoencoder', 'losses.png'), val_losses = avg_test_losses)
+    def pred_from_latent_space(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.to(self.device)
+        with torch.no_grad():
+            pred_reconstruction = self.decoder(x).view(28, 28)
+        
+        return pred_reconstruction
 
-    with torch.no_grad():
-        for test_batch_X, _ in test_data:
-            test_batch_X = test_batch_X.to(device)
-            test_batch_X = test_batch_X.view(-1, 28 * 28)
-            pred_X = model(test_batch_X)
-            save_from_flat_tensor(test_batch_X[28], 'ground.png')
-            save_from_flat_tensor(pred_X[28], 'pred.png')
-
-            break
-
-
-    if save:
-        pass
-
-
-def validate(model: nn.Module, test_data: DataLoader, loss_fn: Callable, device: str) -> float:
-    test_losses = []
-    with torch.no_grad():
-        for test_batch_X, _ in test_data:
-            test_batch_X = test_batch_X.to(device)
-            test_batch_X = test_batch_X.view(-1, 28 * 28)
-
-            pred_X = model(test_batch_X)
-            loss = loss_fn(pred_X, test_batch_X)
-            test_losses.append(loss.item())
-
-    return np.mean(np.array(test_losses))
-
-
-def draw_losses(train_losses: List[float], interval_size: int, save_path: str, val_losses: List[float] = None) -> None:
-    assert len(train_losses) == len(val_losses)
-    batches = [0]
-    while len(batches) != len(train_losses):
-        batches.append(batches[len(batches) - 1] + interval_size)
-            
-    plt.plot(batches, train_losses, 'r-', label = 'Training loss')
-    plt.plot(batches, val_losses, 'b-', label = 'Validation loss')
-    plt.title(f'Average MSE of the last {interval_size} batches of {BATCH_SIZE} images')
-    plt.xlabel('Batch')
-    plt.ylabel('Loss (MSE)')
-    plt.legend(loc = 'upper right')
-    plt.savefig(save_path)
-
-
-def get_device() -> str:
-    if torch.cuda.is_available():
-        print('Using GPU...')
-        device = torch.device('cuda:0')
-    else:
-        print('Using CPU...')
-        device = torch.device('cpu')
-
-    print()
-    return device
-
-
-def save_from_flat_tensor(flat_img: torch.Tensor, name: str) -> torch.Tensor:
-    img = flat_img.view(28, 28)
-    img *= MNIST_STD
-    img += MNIST_MEAN
-    img *= 255
-    img = img.type(torch.uint8)
-    print(img)
-    plt.imsave(os.path.join(name), np.array(img.cpu()), cmap = 'Greys')
 
 def main():
     device = get_device()
@@ -202,9 +101,46 @@ def main():
     test_data = torchvision.datasets.MNIST(os.path.join('.', 'data'), train = False, download = True, transform = normalize)
     test_loader = DataLoader(test_data, batch_size = int(len(test_data) / 2))
 
-    model = AutoencoderDense(64, device)
-    print(list(model.children()))
-    train(model, train_loader, device, test_data = test_loader, n_epochs = 10)
+    n_latent_dims = 64
+    autoencoder = AutoencoderDense(n_latent_dims, device)
+    train(autoencoder, train_loader, BATCH_SIZE, device, test_data = test_loader, n_epochs = 1)
+
+    latent_X = torch.Tensor(np.array([.5] * n_latent_dims))
+    reconstruction = autoencoder.pred_from_latent_space(latent_X)
+    save_from_flat_tensor(reconstruction, 'latent-space-trial.png')
+
+    latent_space = [0.0] * n_latent_dims
+    # fig = plt.figure()#figsize = (5, 5))
+    fig, ax = plt.subplots(5, 5)
+    # plt.axis('off')
+    ax.xaxis.set_visible(False)
+    ax.yaxis.set_visible(False)
+    latent_idx1 = 5
+    latent_idx2 = 28
+    x1 = -0.5
+    x2 = -0.5
+    i = 0
+    for x1_step in range(5):
+        for x2_step in range(5):
+            fig.add_subplot(5, 5, i + 1)
+
+            latent_space[latent_idx1] = x1
+            latent_space[latent_idx2] = x2
+            reconstruction = autoencoder.pred_from_latent_space(torch.Tensor(np.array(latent_space))).cpu()
+            plt.imshow(reconstruction, cmap = 'Greys')
+
+            i += 1
+            x2 += 0.2
+        x1 += 0.2
+    plt.savefig('trial.png')
+
+    # columns = 4
+    # rows = 5
+    # for i in range(1, columns*rows +1):
+    #     img = 
+    #     fig.add_subplot(rows, columns, i)
+    #     plt.imshow(img)
+    # plt.show()
 
 
 if __name__ == '__main__':

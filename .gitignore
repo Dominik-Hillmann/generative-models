@@ -1,3 +1,4 @@
 .vscode/
 data/MNIST/
 .pylintrc
+__pycache__/

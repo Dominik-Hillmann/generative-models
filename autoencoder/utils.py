@@ -25,7 +25,8 @@ def train(
     n_epochs: int = 5, 
     lr: float = 0.001,
     n_batches_till_test: int = 10,
-    save: bool = False
+    save: bool = False,
+    img_save_path: str = None
 ) -> None:
     """This function trains the model on the ```train_data``` and validates it
     on ```test_data```, if it is given.
@@ -72,20 +73,9 @@ def train(
                 batch_train_losses.clear()
     
     if test_data is not None:
-        draw_losses(avg_train_losses, n_batches_till_test, os.path.join('autoencoder', 'losses-dense.png'), val_losses = avg_test_losses)
+        draw_losses(avg_train_losses, n_batches_till_test, img_save_path, val_losses = avg_test_losses)
     else:
-        draw_losses(avg_train_losses, n_batches_till_test, os.path.join('autoencoder', 'losses-dense.png'), val_losses = avg_test_losses)
-
-    with torch.no_grad():
-        for test_batch_X, _ in test_data:
-            test_batch_X = test_batch_X.to(device)
-            test_batch_X = test_batch_X.view(-1, 28 * 28)
-            pred_X = model(test_batch_X)
-            save_from_flat_tensor(test_batch_X[28], 'ground.png')
-            save_from_flat_tensor(pred_X[28], 'pred.png')
-
-            break
-
+        draw_losses(avg_train_losses, n_batches_till_test, img_save_path, val_losses = avg_test_losses)
 
     if save:
         pass
@@ -160,11 +150,11 @@ def get_device() -> str:
     return device
 
 
-def save_from_flat_tensor(flat_img: torch.Tensor, name: str) -> torch.Tensor:
+def save_from_flat_tensor(flat_img: torch.Tensor, save_path: str) -> torch.Tensor:
     img = flat_img.view(28, 28)
     img *= MNIST_STD
     img += MNIST_MEAN
     img *= 255
     img = img.type(torch.uint8)
     print(img)
-    plt.imsave(os.path.join(name), np.array(img.cpu()), cmap = 'Greys')
+    plt.imsave(save_path, np.array(img.cpu()), cmap = 'Greys')

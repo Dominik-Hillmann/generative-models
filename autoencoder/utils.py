@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 # Typing
-from typing import Callable, List
+from typing import Callable, List, Tuple
 # Constants
 MNIST_MEAN = 0.1307
 MNIST_STD = 0.3081
@@ -26,7 +26,8 @@ def train(
     lr: float = 0.001,
     n_batches_till_test: int = 10,
     save: bool = False,
-    img_save_path: str = None
+    img_save_path: str = None, 
+    flatten: bool = True
 ) -> None:
     """This function trains the model on the ```train_data``` and validates it
     on ```test_data```, if it is given.
@@ -55,7 +56,8 @@ def train(
         for batch_idx, (train_batch_X, _) in tqdm(enumerate(train_data)):
             batch_train_losses = []
             train_batch_X = train_batch_X.to(device)
-            train_batch_X = train_batch_X.view(-1, 28 * 28)
+            if flatten:
+                train_batch_X = train_batch_X.view(-1, 28 * 28)
 
             model.zero_grad()
             pred_X = model(train_batch_X)
@@ -66,7 +68,7 @@ def train(
 
             if batch_idx % (batch_size * n_batches_till_test) == 0:
                 if test_data is not None:
-                    test_loss = validate(model, test_data, loss_fn, device)
+                    test_loss = validate(model, test_data, loss_fn, device, flatten = flatten)
                     avg_test_losses.append(test_loss)
 
                 avg_train_losses.append(np.mean(np.array(batch_train_losses)))                
@@ -81,7 +83,7 @@ def train(
         pass
 
 
-def validate(model: nn.Module, test_data: DataLoader, loss_fn: Callable, device: str) -> float:
+def validate(model: nn.Module, test_data: DataLoader, loss_fn: Callable, device: str, flatten: bool = True) -> float:
     """Validates ```model``` on ```test_data```.
 
     Args
@@ -100,7 +102,8 @@ def validate(model: nn.Module, test_data: DataLoader, loss_fn: Callable, device:
     with torch.no_grad():
         for test_batch_X, _ in test_data:
             test_batch_X = test_batch_X.to(device)
-            test_batch_X = test_batch_X.view(-1, 28 * 28)
+            if flatten:
+                test_batch_X = test_batch_X.view(-1, 28 * 28)
 
             pred_X = model(test_batch_X)
             loss = loss_fn(pred_X, test_batch_X)
@@ -115,6 +118,15 @@ def draw_losses(
     save_path: str,
     val_losses: List[float] = None
 ) -> None:
+    """Saves an image of the training and validation losses.
+
+    Args
+    ----
+        train_losses (List[float]): The losses of the training data.
+        interval_size (int): How many training batches are forwarded until the test data is run.
+        save_path (str): The path the image will be saved to.
+        val_losses (List[float], optional): The losses of the validation data. Defaults to None.
+    """
 
     assert len(train_losses) == len(val_losses)
     batches = [0]
@@ -150,11 +162,75 @@ def get_device() -> str:
     return device
 
 
-def save_from_flat_tensor(flat_img: torch.Tensor, save_path: str) -> torch.Tensor:
+def save_from_flat_tensor(flat_img: torch.Tensor, save_path: str) -> None:
+    """Transforms a flat ```(-1, 28 * 28)``` back to ```(-1, 28, 28)``` and 
+    saves it as an image.
+
+    Args
+    ----
+        flat_img (torch.Tensor): The flattened tensor.
+        save_path (str): The path the image will be saved to.
+    """
+
     img = flat_img.view(28, 28)
     img *= MNIST_STD
     img += MNIST_MEAN
     img *= 255
     img = img.type(torch.uint8)
-    print(img)
     plt.imsave(save_path, np.array(img.cpu()), cmap = 'Greys')
+
+
+def travel_2d_latent_space(
+    model: nn.Module,
+    latent_space_size: int,
+    latent_idxs: Tuple[int, int],
+    save_path: str,
+    n_steps: Tuple[int, int] = (5, 5),
+    step_size: float = 1.5,
+    latent_z_start: float = -1.0,
+    unused_latent_dim_val: float = 0.0
+) -> None:
+    """Creates an image with outputs of the decoder using a range of values
+    in the latent space.
+
+    Args
+    ----
+        model (nn.Module): The decoder which has to implmenent predict_from_latent_space.
+        latent_space_size (int): Number of dimensions in the latent space.
+        latent_idxs (Tuple[int, int]): The selection of two dimensions in the latent space that will be changed.
+        save_path (str): The path the image of the travel will be saved to.
+        n_steps (Tuple[int, int], optional): Number of steps in both selected dimensions. Defaults to (5, 5).
+        step_size (float, optional): The size of each step in the selected latent dimensions. Defaults to 1.5.
+        latent_z_start (float, optional): Start value of the selected latent dimensions. Defaults to -1.0.
+        unused_latent_dim_val (float, optional): The value all latent dimensions will be set to while the two selected are being traveled. Defaults to 0.0.
+    """
+
+    latent_space = [unused_latent_dim_val] * latent_space_size
+    fig, ax = plt.subplots(*n_steps, sharex = True, sharey = True)
+    fig.tight_layout(pad = 1.0)
+    latent_idx1, latent_idx2 = latent_idxs
+    z1 = latent_z_start
+    z2 = latent_z_start
+    i = 0
+    for z1_step in range(n_steps[0]):
+        z2 = latent_z_start
+        for z2_step in range(n_steps[1]):
+            fig.add_subplot(*n_steps, i + 1)
+
+            latent_space[latent_idx1] = z1
+            latent_space[latent_idx2] = z2
+            latent_X = torch.Tensor(latent_space)
+            reconstruction = model.pred_from_latent_space(latent_X).cpu()
+            
+            ax[z1_step, z2_step].set_yticklabels([])
+            ax[z1_step, z2_step].set_xticklabels([])
+            ax[z1_step, z2_step].axis('off')
+            plt.title(f'$(z_1={round(z1, 1)}, z_2={round(z2, 1)})$', fontdict = {'fontsize': 7})
+            plt.imshow(reconstruction, cmap = 'Greys')
+            plt.axis('off')
+
+            i += 1
+            z2 += step_size
+        z1 += step_size
+    # fig.suptitle('Reconstruction from latent space with values $(x_1, x_2)$', y = -0.01)
+    plt.savefig(save_path)

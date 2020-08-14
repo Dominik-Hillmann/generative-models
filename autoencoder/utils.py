@@ -162,6 +162,10 @@ def get_device() -> str:
     return device
 
 
+def save_from_tensor(img: torch.Tensor, save_path: str) -> None:
+    save_from_flat_tensor(img, save_path)
+
+
 def save_from_flat_tensor(flat_img: torch.Tensor, save_path: str) -> None:
     """Transforms a flat ```(-1, 28 * 28)``` back to ```(-1, 28, 28)``` and 
     saves it as an image.
@@ -177,6 +181,7 @@ def save_from_flat_tensor(flat_img: torch.Tensor, save_path: str) -> None:
     img += MNIST_MEAN
     img *= 255
     img = img.type(torch.uint8)
+    print(img)
     plt.imsave(save_path, np.array(img.cpu()), cmap = 'Greys')
 
 
@@ -205,23 +210,26 @@ def travel_2d_latent_space(
         unused_latent_dim_val (float, optional): The value all latent dimensions will be set to while the two selected are being traveled. Defaults to 0.0.
     """
 
-    latent_space = [unused_latent_dim_val] * latent_space_size
+    
     fig, ax = plt.subplots(*n_steps, sharex = True, sharey = True)
     fig.tight_layout(pad = 1.0)
+
     latent_idx1, latent_idx2 = latent_idxs
+    assert latent_idx1 < latent_space_size and latent_idx2 < latent_space_size
+    latent_space = [unused_latent_dim_val] * latent_space_size
     z1 = latent_z_start
     z2 = latent_z_start
+
     i = 0
     for z1_step in range(n_steps[0]):
         z2 = latent_z_start
         for z2_step in range(n_steps[1]):
-            fig.add_subplot(*n_steps, i + 1)
-
             latent_space[latent_idx1] = z1
             latent_space[latent_idx2] = z2
-            latent_X = torch.Tensor(latent_space)
-            reconstruction = model.pred_from_latent_space(latent_X).cpu()
-            
+            latent_Z = torch.Tensor(latent_space)
+            reconstruction = model.pred_from_latent_space(latent_Z).cpu()
+
+            fig.add_subplot(*n_steps, i + 1)
             ax[z1_step, z2_step].set_yticklabels([])
             ax[z1_step, z2_step].set_xticklabels([])
             ax[z1_step, z2_step].axis('off')
@@ -232,5 +240,5 @@ def travel_2d_latent_space(
             i += 1
             z2 += step_size
         z1 += step_size
-    # fig.suptitle('Reconstruction from latent space with values $(x_1, x_2)$', y = -0.01)
+    # fig.suptitle('Reconstruction from latent space with values $(z_1, z_2)$', y = -0.01)
     plt.savefig(save_path)

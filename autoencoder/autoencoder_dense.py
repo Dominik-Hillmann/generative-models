@@ -38,12 +38,13 @@ class EncoderDense(nn.Module):
 
         self.dense_1 = nn.Linear(28 * 28, 256)
         self.dense_2 = nn.Linear(256, n_latent_dims)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = func.leaky_relu(self.dense_1(x))
-        x = func.leaky_relu(self.dense_2(x))
         
-        return x
+
+    def forward(self, batch_X: torch.Tensor) -> torch.Tensor:
+        batch_X = func.leaky_relu(self.dense_1(batch_X))
+        batch_X = func.leaky_relu(self.dense_2(batch_X))
+        
+        return batch_X
 
 
 class DecoderDense(nn.Module):
@@ -57,11 +58,11 @@ class DecoderDense(nn.Module):
         self.dense_2 = nn.Linear(256, 28 * 28)
 
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = func.leaky_relu(self.dense_1(x))
-        x = self.dense_2(x)
+    def forward(self, batch_X: torch.Tensor) -> torch.Tensor:
+        batch_X = func.leaky_relu(self.dense_1(batch_X))
+        batch_X = self.dense_2(batch_X)
 
-        return x
+        return batch_X
 
 
 class AutoencoderDense(nn.Module):
@@ -75,16 +76,17 @@ class AutoencoderDense(nn.Module):
         self.decoder = DecoderDense(n_latent_dims, device)
 
 
-    def _flatten(self, x: torch.Tensor):
-        return x.view(-1, 28 * 28)
+    def _flatten(self, batch_X: torch.Tensor) -> torch.Tensor:
+        return batch_X.view(-1, 28 * 28)
 
 
-    def forward(self, x: torch.Tensor):
-        x = self._flatten(x)
-        x = self.encoder(x)
-        x = self.decoder(x)
+    def forward(self, batch_X: torch.Tensor) -> torch.Tensor:
+        batch_X = self._flatten(batch_X)
+        batch_X = self.encoder(batch_X)
+        batch_X = self.decoder(batch_X)
         
-        return x
+        return batch_X
+
 
     def get_decoder(self) -> nn.Module:
         return list(self.children())[1]
@@ -98,7 +100,7 @@ class AutoencoderDense(nn.Module):
         return pred_X_reconstruction
 
 
-def main():
+def main() -> None:
     device = get_device()
 
     normalize = transforms.Compose([
